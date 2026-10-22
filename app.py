@@ -4,6 +4,8 @@ import pickle
 import joblib
 import pandas as pd
 import streamlit as st
+import numpy as np
+from sklearn.base import BaseEstimator, TransformerMixin
 
 # ----------------------------------------------------------------------------
 # Page config
@@ -37,6 +39,44 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
+
+# ----------------------------------------------------------------------------
+# Custom transformers used inside the saved pipeline.
+# These MUST match the notebook exactly, otherwise loading the .pkl fails with
+# "Can't get attribute 'FeatureEngineer' on <module '__main__'>".
+# ----------------------------------------------------------------------------
+class FeatureEngineer(BaseEstimator, TransformerMixin):
+    def __init__(self):
+        pass
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        X_out = X.copy()
+        X_out["TotalIncome"] = X_out["ApplicantIncome"] + X_out["CoapplicantIncome"]
+        X_out["EMI"] = X_out["LoanAmount"] / X_out["Loan_Amount_Term"].replace(0, 360)
+        X_out["Balance_Income"] = X_out["TotalIncome"] - (X_out["EMI"] * 1000)
+        X_out["Log_TotalIncome"] = np.log1p(X_out["TotalIncome"])
+        X_out["Log_LoanAmount"] = np.log1p(X_out["LoanAmount"])
+        return X_out
+
+
+class DataFrameReconstructor(BaseEstimator, TransformerMixin):
+    def __init__(self, num_cols, cat_cols):
+        self.num_cols = num_cols
+        self.cat_cols = cat_cols
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        col_names = self.num_cols + self.cat_cols
+        df_reconstructed = pd.DataFrame(X, columns=col_names)
+        for col in self.num_cols:
+            df_reconstructed[col] = pd.to_numeric(df_reconstructed[col])
+        return df_reconstructed
 
 MODEL_FILE = "loan_approval_pipeline.pkl"
 
@@ -155,7 +195,7 @@ if submitted:
         {
             "Gender": [gender],
             "Married": [married],
-            "Dependents": [dependents],
+            "Dependents": ["3" if dependents == "3+" else dependents],  # pipeline expects numeric
             "Education": [education],
             "Self_Employed": [self_employed],
             "ApplicantIncome": [int(applicant_income)],
